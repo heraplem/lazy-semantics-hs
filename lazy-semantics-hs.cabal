@@ -16,6 +16,8 @@ extra-doc-files:    CHANGELOG.md
 library
     exposed-modules:  Language.Lazy
     default-extensions: DataKinds
+                      , BlockArguments
+                      , LambdaCase
                       , TypeFamilies
     build-depends:    base ^>=4.18.2.1
                     , mtl ^>=2.3.1
