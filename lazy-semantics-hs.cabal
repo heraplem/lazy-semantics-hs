@@ -15,6 +15,7 @@ extra-doc-files:    CHANGELOG.md
 
 library
     exposed-modules:  Language.Lazy
+                    , Language.LazySmall
     default-extensions: DataKinds
                       , BlockArguments
                       , LambdaCase
