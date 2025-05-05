@@ -1,11 +1,14 @@
-{-# LANGUAGE RebindableSyntax, ImplicitPrelude #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
 
 module Language.LazySmall where
 
 import Numeric.Natural
+import Data.Functor.Const
 import Control.Monad.ST
 import Data.STRef
 import Control.Monad.State
+
+import Control.Monad.Ref
 import Control.Monad.Tick
 
 data Term rep where
@@ -14,32 +17,68 @@ data Term rep where
   App :: Term rep -> rep -> Term rep
   Let :: Term rep -> (rep -> Term rep) -> Term rep
 
+pp :: Monad m => m String -> (rep -> String) -> Term rep -> m String
+pp m s = go where
+  go (Var x) = return (s x)
+  go (Abs f) = do
+    x <- m
+
+
 type Program = forall rep. Term rep
 
-newtype FixTerm s = In { out :: Term (STRef s (FixTerm s)) }
+newtype FixTerm r = In { out :: Term (r (FixTerm r)) }
 
-normalize' :: FixTerm s -> TickT Natural (ST s) (FixTerm s)
-normalize' (In t) = case t of
+normalizeFixTerm :: (MonadTick m, MonadRef r m) => FixTerm r -> m (FixTerm r)
+normalizeFixTerm (In t) = case t of
   Var x -> do
     tick
-    t <- lift (readSTRef x)
-    t' <- normalize' t
-    lift (x `writeSTRef` t')
+    t <- getRef x
+    t' <- normalizeFixTerm t
+    setRef x t'
     return t'
   App t x -> do
     tick
-    In t' <- normalize' (In t)
+    In t' <- normalizeFixTerm (In t)
     case t' of
-      Abs f -> normalize' (In (f x))
+      Abs f -> normalizeFixTerm (In (f x))
       _ -> error "app of non-abs"
   Let t f -> do
     tick
-    x <- lift (newSTRef (In t))
-    normalize' (In (f x))
-  t -> return (In t)  
+    x <- newRef (In t)
+    normalizeFixTerm (In (f x))
+  t -> return (In t)
 
-count :: Program -> Natural
-count t = runST (snd <$> (runTickT . normalize' . In $ t))
+newtype NormalizeM s a = NormalizeM
+  { getNormalizeM :: StateT Natural (TickT Natural (ST s)) a
+  }
+  deriving (Functor, Applicative, Monad)
+
+runNormalizeM :: (forall s. NormalizeM s a) -> (a, Natural)
+runNormalizeM m =
+  let ((a, _), n) = runST (runTickT $ flip runStateT 0 $ getNormalizeM m)
+  in (a, n)
+
+instance MonadTick (NormalizeM s) where
+  tick = NormalizeM tick
+
+data NormalizeMRef s a
+  = NormalizeMRef (STRef s a) Natural
+
+instance MonadRef (NormalizeMRef s) (NormalizeM s) where
+  newRef a = NormalizeM do
+    n <- get
+    put (n + 1)
+    r <- newRef a
+    return (NormalizeMRef r n)
+  getRef (NormalizeMRef r _) = NormalizeM $ getRef r
+  setRef (NormalizeMRef r _) = NormalizeM . setRef r
+
+forget :: FixTerm (NormalizeMRef s) -> Term Natural
+forget (In t) = case t of
+  Var (NormalizeMRef _ n) -> Var n
+  Abs f -> Abs (forget . In . f . NormalizeMRef undefined)
+  App t (NormalizeMRef _ n) -> App (forget (In t)) n
+  Let t f -> Let (forget (In t)) (forget . In . f . NormalizeMRef undefined)
 
 ex :: Program
 ex = do
@@ -57,5 +96,7 @@ ex = do
     Var succ `App` one
   Var plus `App` two `App` two
   where
-    return = Var
     (>>=) = Let
+
+ex' :: Term Natural
+ex' = fst $ runNormalizeM (forget <$> (normalizeFixTerm (In (ex))))

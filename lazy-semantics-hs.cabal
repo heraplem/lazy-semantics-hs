@@ -17,9 +17,12 @@ library
     exposed-modules:  Language.Lazy
                     , Language.LazySmall
                     , Control.Monad.Tick
+                    , Control.Monad.Ref
     default-extensions: DataKinds
                       , BlockArguments
+                      , FunctionalDependencies
                       , LambdaCase
+                      , RebindableSyntax, ImplicitPrelude
                       , TypeFamilies
     build-depends:    base ^>=4.18.2.1
                     , mtl ^>=2.3.1

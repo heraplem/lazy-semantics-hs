@@ -1,20 +1,26 @@
-{-# LANGUAGE UndecidableInstances #-}
-
 module Control.Monad.Tick where
 
 import Data.Monoid
+import Control.Monad.Trans
 import Control.Monad.Writer
+import Control.Monad.State
 
 class Monad m => MonadTick m where
   tick :: m ()
 
--- XXX `Monad m` constraint is necessary to prevent possible looping at runtime.
-instance (Num n, Monad m, MonadWriter (Sum n) m) => MonadTick m where
-  tick = tell 1
+newtype TickT n m a = TickT { getTickT :: WriterT (Sum n) m a }
+  deriving (Functor, Applicative, Monad)
 
-type TickT n m = WriterT (Sum n) m
+instance Num n => MonadTrans (TickT n) where
+  lift = TickT . lift
+
+instance (Num n, Monad m) => MonadTick (TickT n m) where
+  tick = TickT (tell 1)
+
+instance MonadTick m => MonadTick (StateT s m) where
+  tick = lift tick
 
 runTickT :: Monad m => TickT n m a -> m (a, n)
-runTickT m = do
+runTickT (TickT m) = do
   (a, Sum n) <- runWriterT m
   return (a, n)
