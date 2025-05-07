@@ -16,15 +16,24 @@ extra-doc-files:    CHANGELOG.md
 library
     exposed-modules:  Language.Lazy
                     , Language.LazySmall
-                    , Control.Monad.Tick
+                    , Control.Monad.Exit
+                    , Control.Monad.Fresh
+                    , Control.Monad.Heap.List
                     , Control.Monad.Ref
-    default-extensions: DataKinds
+                    , Control.Monad.Tick
+    default-extensions: AllowAmbiguousTypes
+                      , DataKinds
                       , BlockArguments
                       , FunctionalDependencies
                       , LambdaCase
                       , RebindableSyntax, ImplicitPrelude
+                      , TemplateHaskell
                       , TypeFamilies
     build-depends:    base ^>=4.18.2.1
                     , mtl ^>=2.3.1
+                    , polysemy ^>=1.9.2.0
+                    , polysemy-plugin ^>=0.4.5.3
+                    , lens ^>=5.3.4
     hs-source-dirs:   src
     default-language: GHC2021
+    ghc-options:      -fplugin=Polysemy.Plugin
