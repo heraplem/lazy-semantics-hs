@@ -20,6 +20,14 @@ failToExit ::
 failToExit = interpret \case
   Fail s -> exit s
 
+exitToFail ::
+  Member Fail r =>
+  (e -> String) ->
+  Sem (Exit e : r) a ->
+  Sem r a
+exitToFail proj = interpret \case
+  Exit e -> fail (proj e)
+
 -- | Transform an 'Exit' effect into an 'Error' effect.
 exitToError ::
   Member (Error e) r =>

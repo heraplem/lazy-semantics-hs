@@ -1,16 +1,23 @@
 module Language.LazySmall where
 
 import Numeric.Natural
+import Data.Maybe
 import Control.Monad
+
+import Control.Lens
 
 import Polysemy
 import Polysemy.Error
+import Polysemy.Fail
+import Polysemy.Input
 import Polysemy.NonDet
 import Polysemy.State
 import Polysemy.Tagged
 
+import Data.Functor.Base
+import Data.Functor.Foldable
+
 import Control.Monad.Exit
-import Control.Monad.Fresh
 import Control.Monad.Heap.List
 import Control.Monad.Ref
 import Control.Monad.Tick
@@ -23,26 +30,42 @@ data Term rep
 
 type Program = forall rep. Term rep
 
-pp :: Member (Fresh String) r => Term String -> Sem r String
-pp (Var x) = return x
-pp (Abs f) = do
-  x <- fresh
-  pp (f x)
-pp (App t x) = do
-  s <- pp t
-  return (s ++ x)
-pp (Let t f) = do
-  s1 <- pp t
-  x <- fresh
-  s2 <- pp (f x)
-  return (s1 ++ s2)
+data TermF rep r
+  = VarF rep
+  | AbsF (rep -> r)
+  | AppF r rep
+  | LetF r (rep -> r)
+  deriving (Functor)
 
-invmapTerm :: (rep -> rep') -> (rep' -> rep) -> Term rep -> Term rep'
-invmapTerm to from = go where
-  go (Var x) = Var (to x)
-  go (Abs f) = Abs (go . f . from)
-  go (App t x) = App (go t) (to x)
-  go (Let t f) = Let (go t) (go . f . from)
+type instance Base (Term rep) = TermF rep
+
+instance Recursive (Term rep) where
+  project (Var x) = VarF x
+  project (Abs f) = AbsF f
+  project (App t x) = AppF t x
+  project (Let x f) = LetF x f
+
+instance Corecursive (Term rep) where
+  embed (VarF x) = Var x
+  embed (AbsF f) = Abs f
+  embed (AppF t x) = App t x
+  embed (LetF x f) = Let x f
+
+pp :: Member (Input rep) r => (rep -> String) -> Term rep -> Sem r String
+pp proj = cata \case
+  VarF x ->
+    pure (proj x)
+  AbsF f -> do
+    x <- input
+    pure "(lambda" <> pure (proj x) <> pure "." <> f x <> pure ")"
+  AppF t x ->
+    pure "(" <> t <> pure " " <> pure (proj x) <> pure ")"
+  LetF t f -> do
+    x <- input
+    pure "(let " <> pure (proj x) <> pure " = " <> t <> pure " in " <> f x <> pure ")"
+
+ppShow :: (Show rep, Member (Input rep) r) => Term rep -> Sem r String
+ppShow = pp show
 
 normalize :: ( Member (Exit ()) r
              , Member (Ref k (Term k)) r
@@ -68,17 +91,15 @@ normalize (Let t f) = do
 
 normalizeListHeap ::
   Term Int ->
-  Maybe (Natural, (Heap (Term Int), Term Int))
+  Either String (Natural, (Heap (Term Int), Term Int))
 normalizeListHeap
-  = join
-  . run
-  . runExitMaybe
-  . untag
-  . runExitMaybe
+  = run
+  . runFail
   . runTickSum
+  . exitToFail (const "heap lookup error")
   . runState empty
   . refToHeapStateAndExit
-  . tag
+  . exitToFail (const "app of non-abs")
   . normalize
 
 -- normalize :: (MonadFail m, MonadTick m, MonadRef k (Term k) m) => Term k -> m (Term k)
@@ -173,3 +194,15 @@ ex = do
   Var plus `App` two `App` two
   where
     (>>=) = Let
+
+mapInput ::
+  (j -> i) ->
+  Sem (Input i : r) a ->
+  Sem (Input j : r) a
+mapInput proj = reinterpret \case
+  Input -> proj <$> input
+
+ex' :: Either String String
+ex' = do
+  (_, (h, t)) <- normalizeListHeap ex
+  return (run . runInputList [h^.size ..] . mapInput fromJust . ppShow $ t)
